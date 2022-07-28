@@ -2,6 +2,7 @@
 package rpc
 
 import (
+	"fmt"
 	"io"
 	"reflect"
 
@@ -18,12 +19,12 @@ func (c *PingCmd)WriteTo(w io.Writer)(n int64, err error){
 	return encoding.WriteUint64(w, c.Data)
 }
 
-func (c *PingCmd)ReadFrom(r io.Reader, ctx *Context)(n int64, err error){
+func (c *PingCmd)ReadFrom(r io.Reader, p *Point)(n int64, err error){
 	c.Data, n, err = encoding.ReadUint64(r)
 	if err != nil {
 		return
 	}
-	err = ctx.SendCommand(PONG, &PongCmd{
+	err = p.SendCommand(CmdPong, &PongCmd{
 		Data: c.Data,
 	})
 	return
@@ -39,12 +40,12 @@ func (c *PongCmd)WriteTo(w io.Writer)(n int64, err error){
 	return encoding.WriteUint64(w, c.Data)
 }
 
-func (c *PongCmd)ReadFrom(r io.Reader, ctx *Context)(n int64, err error){
+func (c *PongCmd)ReadFrom(r io.Reader, p *Point)(n int64, err error){
 	c.Data, n, err = encoding.ReadUint64(r)
 	if err != nil {
 		return
 	}
-	go func(){ ctx.pingch <- struct{}{} }()
+	go func(){ p.pingch <- struct{}{} }()
 	return
 }
 
@@ -66,7 +67,7 @@ func (c *DefCmd)WriteTo(w io.Writer)(n int64, err error){
 	return
 }
 
-func (c *DefCmd)ReadFrom(r io.Reader, ctx *Context)(n int64, err error){
+func (c *DefCmd)ReadFrom(r io.Reader, p *Point)(n int64, err error){
 	var n0 int64
 	c.Id, n, err = encoding.ReadUint32(r)
 	if err != nil {
@@ -77,7 +78,7 @@ func (c *DefCmd)ReadFrom(r io.Reader, ctx *Context)(n int64, err error){
 	if err != nil {
 		return
 	}
-	ctx.defs[c.Name] = c.Id
+	p.defs[c.Name] = c.Id
 	return
 }
 
@@ -115,7 +116,7 @@ func (c *CallCmd)WriteTo(w io.Writer)(n int64, err error){
 	return
 }
 
-func (c *CallCmd)ReadFrom(r io.Reader, ctx *Context)(n int64, err error){
+func (c *CallCmd)ReadFrom(r io.Reader, p *Point)(n int64, err error){
 	var n0 int64
 	c.Id, n, err = encoding.ReadUint32(r)
 	if err != nil {
@@ -132,13 +133,23 @@ func (c *CallCmd)ReadFrom(r io.Reader, ctx *Context)(n int64, err error){
 	if err != nil {
 		return
 	}
-	if c.Id > (uint32)(len(ctx.funcs)) {
-		panic("Unbinded function id")
+	if c.Id > (uint32)(len(p.funcs)) {
+		err = p.SendCommand(CmdError, &ErrorCmd{
+			Session: c.Session,
+			Errid: ErrNotExists,
+			Msg: fmt.Sprintf("Unbinded function id '%d'", c.Id),
+		})
+		return
 	}
-	fuc := ctx.funcs[c.Id]
+	fuc := p.funcs[c.Id]
 	fuct := fuc.Type()
 	if fuct.NumIn() != (int)(l) {
-		panic("Arguments length not same")
+		err = p.SendCommand(CmdError, &ErrorCmd{
+			Session: c.Session,
+			Errid: ErrArgs,
+			Msg: fmt.Sprintf("Arguments length not same for '%d', except %d but have %d", c.Id, fuct.NumIn(), l),
+		})
+		return
 	}
 	c.Args = make([]reflect.Value, l)
 	for i := 0; i < (int)(l); i++ {
@@ -149,32 +160,40 @@ func (c *CallCmd)ReadFrom(r io.Reader, ctx *Context)(n int64, err error){
 		}
 	}
 	go func(){
-		if c.Id >= (uint32)(len(ctx.funcs)) {
+		var err error
+		if c.Id >= (uint32)(len(p.funcs)) {
 			return
 		}
 		out := fuc.Call(c.Args)
 		var res reflect.Value
 		if len(out) != 0 {
-			er, ie := out[0].Interface().(error)
+			var (
+				er error
+				ie bool
+			)
 			if len(out) == 2 {
 				er = out[1].Interface().(error)
 				ie = true
+			}else{
+				er, ie = out[0].Interface().(error)
 			}
 			if ie {
 				if er != nil {
-					err := ctx.SendCommand(ERROR, &ErrorCmd{
+					err = p.SendCommand(CmdError, &ErrorCmd{
 						Session: c.Session,
-						Err: er.Error(),
+						Errid: ErrString,
+						Msg: er.Error(),
 					})
 					if err != nil {
 						panic(err)
 					}
+					return
 				}
 			}else{
 				res = out[0]
 			}
 		}
-		err := ctx.SendCommand(RETURN, &ReturnCmd{
+		err = p.SendCommand(CmdReturn, &ReturnCmd{
 			Session: c.Session,
 			Res: res,
 		})
@@ -216,7 +235,7 @@ func (c *ReturnCmd)WriteTo(w io.Writer)(n int64, err error){
 	return
 }
 
-func (c *ReturnCmd)ReadFrom(r io.Reader, ctx *Context)(n int64, err error){
+func (c *ReturnCmd)ReadFrom(r io.Reader, p *Point)(n int64, err error){
 	var n0 int64
 	c.Session, n, err = encoding.ReadUint32(r)
 	if err != nil {
@@ -242,17 +261,17 @@ func (c *ReturnCmd)ReadFrom(r io.Reader, ctx *Context)(n int64, err error){
 		}
 	}
 	go func(){
-		ctx.lock.Lock()
-		ch, ok := ctx.waiting[c.Session]
+		p.lock.Lock()
+		ses, ok := p.sessions[c.Session]
 		if ok {
-			delete(ctx.waiting, c.Session)
+			delete(p.sessions, c.Session)
 		}
-		ctx.lock.Unlock()
+		p.lock.Unlock()
 		if ok {
 			if c.Res.IsValid() {
-				ch <- c.Res.Interface()
+				ses.ret <- c.Res.Interface()
 			}else{
-				ch <- struct{}{}
+				ses.ret <- struct{}{}
 			}
 		}
 	}()
@@ -261,7 +280,8 @@ func (c *ReturnCmd)ReadFrom(r io.Reader, ctx *Context)(n int64, err error){
 
 type ErrorCmd struct{
 	Session uint32
-	Err string
+	Errid Errid
+	Msg string
 }
 
 var _ Command = (*ErrorCmd)(nil)
@@ -272,31 +292,42 @@ func (c *ErrorCmd)WriteTo(w io.Writer)(n int64, err error){
 	if err != nil {
 		return
 	}
-	n0, err = encoding.WriteString(w, c.Err)
+	n0, err = encoding.WriteUint16(w, c.Errid)
+	n += n0
+	if err != nil {
+		return
+	}
+	n0, err = encoding.WriteString(w, c.Msg)
 	n += n0
 	return
 }
 
-func (c *ErrorCmd)ReadFrom(r io.Reader, ctx *Context)(n int64, err error){
+func (c *ErrorCmd)ReadFrom(r io.Reader, p *Point)(n int64, err error){
 	var n0 int64
 	c.Session, n, err = encoding.ReadUint32(r)
 	if err != nil {
 		return
 	}
-	c.Err, n0, err = encoding.ReadString(r)
+	c.Errid, n0, err = encoding.ReadUint16(r)
+	if err != nil {
+		return
+	}
+	n += n0
+	c.Msg, n0, err = encoding.ReadString(r)
 	n += n0
 	if err != nil {
 		return
 	}
+	rerr := &RemoteErr{c.Errid, c.Msg}
 	go func(){
-		ctx.lock.Lock()
-		ch, ok := ctx.waiting[c.Session]
+		p.lock.Lock()
+		ses, ok := p.sessions[c.Session]
 		if ok {
-			delete(ctx.waiting, c.Session)
+			delete(p.sessions, c.Session)
 		}
-		ctx.lock.Unlock()
+		p.lock.Unlock()
 		if ok {
-			ch <- &RemoteErr{c.Err}
+			ses.ret <- rerr
 		}
 	}()
 	return

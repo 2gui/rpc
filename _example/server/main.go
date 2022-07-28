@@ -3,6 +3,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"os"
 
@@ -20,18 +21,23 @@ func init(){
 }
 
 func main(){
-	println("started")
+	fmt.Println("started")
 	r, w := os.NewFile((uintptr)(readfd), "reader"), os.NewFile((uintptr)(writefd), "writer")
 	p := rpc.NewPoint(w, r)
 	p.Register("helloWorld", func()(string){
-		println("hello world")
+		fmt.Println("calling: helloWorld")
 		return "hello world"
 	})
 	p.Register("add", func(a, b int)(int){
-		println("adding", a, b)
+		fmt.Println("adding:", a, b)
 		return a + b
 	})
-	println("listening")
+	p.Register("error", func(args []int)(err error){
+		err = fmt.Errorf("args error: %v", args)
+		fmt.Println("gen error:", err)
+		return
+	})
+	fmt.Println("listening")
 	err := p.ListenAndWait()
 	if err != nil && err != io.EOF {
 		panic(err)

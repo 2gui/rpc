@@ -20,6 +20,7 @@ const (
 	Int64S = 'q'
 	Float32S = 'F'
 	Float64S = 'D'
+	StringS = 'S'
 )
 
 var (
@@ -34,6 +35,7 @@ var (
 	refInt64T = reflect.TypeOf((int64)(0))
 	refFloat32T = reflect.TypeOf((float32)(0))
 	refFloat64T = reflect.TypeOf((float64)(0))
+	refStringT = reflect.TypeOf((string)(""))
 )
 
 func EncodeTypeSign(typ reflect.Type)(s string){
@@ -65,7 +67,7 @@ func EncodeTypeSign(typ reflect.Type)(s string){
 	case reflect.Array, reflect.Slice:
 		return (string)(ArrayS) + EncodeTypeSign(typ.Elem())
 	case reflect.String:
-		return (string)(ArrayS) + (string)(Uint8S)
+		return (string)(StringS)
 	default:
 		panic("Unexcept type: " + typ.Kind().String())
 	}
@@ -137,6 +139,10 @@ func WriteValue(w io.Writer, v reflect.Value)(n int64, err error){
 	case reflect.Array, reflect.Slice:
 		var n0 int64
 		l := v.Len()
+		n, err = WriteUint32(w, (uint32)(l))
+		if err != nil {
+			return
+		}
 		for i := 0; i < l; i++ {
 			n0, err = WriteValue(w, v.Index(i))
 			n += n0
@@ -176,6 +182,9 @@ func ReadType(r io.Reader)(typ reflect.Type, n int64, err error){
 			return
 		}
 		typ = reflect.SliceOf(typ)
+		return
+	case StringS:
+		typ = refStringT
 		return
 	case BoolS:
 		typ = refBoolT
@@ -247,6 +256,15 @@ func ReadValue(r io.Reader, typ reflect.Type)(val reflect.Value, n int64, err er
 			}
 			val.Index(i).Set(v)
 		}
+		return
+	case reflect.String:
+		var v0 string
+		v0, n, err = ReadString(r)
+		if err != nil {
+			return
+		}
+		val = reflect.New(typ).Elem()
+		val.SetString(v0)
 		return
 	case reflect.Bool:
 		var v0 bool

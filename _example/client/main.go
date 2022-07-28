@@ -53,12 +53,31 @@ func main(){
 	}()
 	p := rpc.NewPoint(w, r)
 	p.Listen()
+	fmt.Println("pinging")
 	err = p.Ping()
 	if err != nil {
 		panic(err)
 	}
-	res, err := p.Call("add", 1, 2)
-	fmt.Println(res, err)
-	w.Close()
+	fmt.Println("calling:::")
+	res, err := p.Call("helloWorld")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("res:", res)
+	res, err = p.Call("add", 1, 2)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("res:", res)
+	res, err = p.Call("add", 1, 0x7fffffff)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("res:", res)
+	res, err = p.Call("error", 0)
+	fmt.Println("res:", res, "err:", err)
+	res, err = p.Call("notdef", 0)
+	fmt.Println("res:", res, "err:", err)
+	p.Close()
 	<-exit
 }
