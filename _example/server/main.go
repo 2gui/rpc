@@ -22,17 +22,17 @@ func init(){
 func main(){
 	println("started")
 	r, w := os.NewFile((uintptr)(readfd), "reader"), os.NewFile((uintptr)(writefd), "writer")
-	ctx := rpc.NewContext(w, r)
-	ctx.Register("helloWorld", func()(string){
+	p := rpc.NewPoint(w, r)
+	p.Register("helloWorld", func()(string){
 		println("hello world")
 		return "hello world"
 	})
-	ctx.Register("add", func(a, b int)(int){
+	p.Register("add", func(a, b int)(int){
 		println("adding", a, b)
 		return a + b
 	})
 	println("listening")
-	err := ctx.ListenAndWait()
+	err := p.ListenAndWait()
 	if err != nil && err != io.EOF {
 		panic(err)
 	}

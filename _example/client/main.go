@@ -11,7 +11,7 @@ import (
 )
 
 func startServer()(cmd *exec.Cmd, r io.ReadCloser, w io.WriteCloser, err error){
-	cmd = exec.Command("go", "run", "../server", "-reader", "3", "-writer", "4")
+	cmd = exec.Command("../example_server", "-reader", "3", "-writer", "4")
 	cr, mw, err := os.Pipe()
 	if err != nil {
 		return
@@ -42,20 +42,23 @@ func main(){
 	}
 	defer w.Close()
 	defer r.Close()
+
+	exit := make(chan struct{}, 0)
 	go func(){
+		defer close(exit)
 		err := cmd.Wait()
 		if err != nil {
 			panic(err)
 		}
 	}()
-	ctx := rpc.NewContext(w, r)
-	ctx.Listen()
-	err = ctx.Ping()
+	p := rpc.NewPoint(w, r)
+	p.Listen()
+	err = p.Ping()
 	if err != nil {
 		panic(err)
 	}
-	res, err := ctx.Call("add", 1, 2)
+	res, err := p.Call("add", 1, 2)
 	fmt.Println(res, err)
 	w.Close()
-	cmd.Wait()
+	<-exit
 }
