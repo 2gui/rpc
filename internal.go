@@ -430,10 +430,14 @@ func filterPtrs(vals []reflect.Value)(ptrs []reflect.Value){
 	}
 	ptrs = make([]reflect.Value, 0, len(vals) / 2 + 1)
 	for _, v := range vals {
-		switch v.Type().Kind() {
-		case reflect.Pointer, reflect.Slice:
-			ptrs = append(ptrs, v)
-		}
+		// println("v.IsNil():", v.IsNil())
+		// println("v.IsZero():", v.IsZero())
+		// if !v.IsNil() {
+			switch v.Type().Kind() {
+			case reflect.Pointer, reflect.Slice:
+				ptrs = append(ptrs, v)
+			}
+		// }
 	}
 	if len(ptrs) == 0 {
 		ptrs = nil
