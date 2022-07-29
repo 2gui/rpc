@@ -69,7 +69,7 @@ func EncodeTypeSign(typ reflect.Type)(s string){
 	case reflect.String:
 		return (string)(StringS)
 	default:
-		panic("Unexcept type: " + typ.Kind().String())
+		panic("Unexpect type: " + typ.Kind().String())
 	}
 }
 
@@ -135,7 +135,17 @@ func WriteValue(w io.Writer, v reflect.Value)(n int64, err error){
 	case reflect.Float64:
 		return WriteFloat64(w, v.Float())
 	case reflect.Pointer:
-		return WriteValue(w, v.Elem())
+		var n0 int64
+		if v.IsNil() {
+			return WriteBool(w, false)
+		}
+		n, err = WriteBool(w, true)
+		if err != nil {
+			return
+		}
+		n0, err = WriteValue(w, v.Elem())
+		n += n0
+		return
 	case reflect.Array, reflect.Slice:
 		var n0 int64
 		l := v.Len()
@@ -154,7 +164,7 @@ func WriteValue(w io.Writer, v reflect.Value)(n int64, err error){
 	case reflect.String:
 		return WriteString(w, v.String())
 	default:
-		panic("Unexcept type: " + v.Type().String())
+		panic("Unexpect type: " + v.Type().String())
 	}
 	return
 }
@@ -228,7 +238,27 @@ func ReadValue(r io.Reader, typ reflect.Type)(val reflect.Value, n int64, err er
 	kind := typ.Kind()
 	switch kind {
 	case reflect.Pointer:
-		return ReadValue(r, typ.Elem())
+		var (
+			v reflect.Value
+			n0 int64
+			ok bool
+		)
+		ok, n, err = ReadBool(r)
+		if err != nil {
+			return
+		}
+		if !ok {
+			val = reflect.New(typ).Elem()
+			return
+		}
+		v, n0, err = ReadValue(r, typ.Elem())
+		n += n0
+		if err != nil {
+			return
+		}
+		val = reflect.New(typ.Elem())
+		val.Elem().Set(v)
+		return
 	case reflect.Array, reflect.Slice:
 		var l uint32
 		var (
@@ -346,6 +376,6 @@ func ReadValue(r io.Reader, typ reflect.Type)(val reflect.Value, n int64, err er
 		val.SetFloat(v0)
 		return
 	default:
-		panic("Unexcept type: " + typ.String())
+		panic("Unexpect type: " + typ.String())
 	}
 }

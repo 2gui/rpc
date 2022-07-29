@@ -11,7 +11,8 @@ import (
 )
 
 func startServer()(cmd *exec.Cmd, r io.ReadCloser, w io.WriteCloser, err error){
-	cmd = exec.Command("../example_server", "-reader", "3", "-writer", "4")
+	// cmd = exec.Command("go", "run", "../server", "-reader", "3", "-writer", "4")
+	cmd = exec.Command("./example_server")
 	cr, mw, err := os.Pipe()
 	if err != nil {
 		return
@@ -64,20 +65,28 @@ func main(){
 		panic(err)
 	}
 	fmt.Println("res:", res)
-	res, err = p.Call("add", 1, 2)
+	// res, err = p.Call("add", 1, 2)
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// fmt.Println("res:", res)
+	var c int32
+	res, err = p.Call("add_ptr", 2, 0x7fffffff, &c)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("res:", res)
-	res, err = p.Call("add", 1, 0x7fffffff)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println("res:", res)
-	res, err = p.Call("error", 0)
-	fmt.Println("res:", res, "err:", err)
-	res, err = p.Call("notdef", 0)
-	fmt.Println("res:", res, "err:", err)
+	fmt.Println("res:", res, c)
+	// var d *int = new(int)
+	// res, err = p.Call("dev_ptr", 2, 0, &d)
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// fmt.Println("res:", res, d)
+	// ea := []int{1, 1, 2}
+	// res, err = p.Call("error", ea)
+	// fmt.Println("res:", res, ea, "err:", err)
+	// res, err = p.Call("notdef", 0)
+	// fmt.Println("res:", res, "err:", err)
 	p.Close()
 	<-exit
 }

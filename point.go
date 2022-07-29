@@ -13,6 +13,7 @@ import (
 )
 
 type sessionT struct{
+	ptrs []reflect.Value
 	ret chan <- any
 }
 
@@ -32,7 +33,7 @@ type Point struct{
 
 	lock sync.Mutex
 	sesinc uint32
-	sessions map[uint32]sessionT
+	sessions map[uint32]*sessionT
 
 	pingch chan struct{}
 }
@@ -51,7 +52,7 @@ func NewPointWithCtx(w io.Writer, r io.ReadCloser, ctx context.Context)(p *Point
 		cancel: cancel,
 		cmds: make(map[Cmd]CommandNewer),
 		defs: make(map[string]uint32),
-		sessions: make(map[uint32]sessionT),
+		sessions: make(map[uint32]*sessionT),
 		pingch: make(chan struct{}),
 	}
 	p.DefineCmd(CmdPing, func()(Command){ return &PingCmd{} })
@@ -110,7 +111,10 @@ func (p *Point)Call(name string, args ...any)(res any, err error){
 		return nil, fmt.Errorf("No method named '%s'", name)
 	}
 	ret := make(chan any, 1)
-
+	ses := &sessionT{
+		ptrs: filterPtrs(vals),
+		ret: ret,
+	}
 	p.lock.Lock()
 	p.sesinc++
 	sesid := p.sesinc
@@ -120,9 +124,7 @@ func (p *Point)Call(name string, args ...any)(res any, err error){
 		}
 		sesid++
 	}
-	p.sessions[sesid] = sessionT{
-		ret: ret,
-	}
+	p.sessions[sesid] = ses
 	p.lock.Unlock()
 
 	err = p.SendCommand(CmdCall, &CallCmd{
@@ -195,27 +197,34 @@ func (p *Point)listener(){
 	var (
 		l uint32
 		err error
+		buf []byte = make([]byte, 32767)
+		buf0 []byte = nil
 	)
 	defer p.cancel()
 	for {
+		buf0 = nil
 		l, _, err = encoding.ReadUint32(p.r)
 		if err != nil {
 			break
 		}
-		buf := make([]byte, l)
-		_, err = io.ReadFull(p.r, buf[:l])
+		if l <= (uint32)(len(buf)) {
+			buf0 = buf
+		}else{
+			buf0 = make([]byte, l)
+		}
+		_, err = io.ReadFull(p.r, buf0[:l])
 		if err != nil {
 			break
 		}
 		{
-			id := (Cmd)(buf[0])
+			id := (Cmd)(buf0[0])
 			newer, ok := p.cmds[id]
 			// println(">>> recv cmd:", id, ok)
 			if !ok {
 				continue
 			}
 			cmd := newer()
-			_, err := cmd.ReadFrom(bytes.NewReader(buf[1:]), p)
+			_, err := cmd.ReadFrom(bytes.NewReader(buf0[1:]), p)
 			if err != nil {
 				println("error: " + err.Error(), id)
 				continue

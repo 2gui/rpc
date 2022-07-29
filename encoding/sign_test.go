@@ -10,7 +10,7 @@ import (
 func TestEncodeTypeSign(t *testing.T){
 	type T struct{
 		t reflect.Type
-		except string
+		expect string
 	}
 	types := []T{
 		{reflect.TypeOf((bool)(false)), "A"},
@@ -54,8 +54,8 @@ func TestEncodeTypeSign(t *testing.T){
 	for _, d := range types {
 		s := EncodeTypeSign(d.t)
 		t.Logf("%-10s %s", d.t.String(), s)
-		if s != d.except {
-			t.Errorf("'%s' is %s, but except %s", d.t.String(), s, d.except)
+		if s != d.expect {
+			t.Errorf("'%s' is %s, but expect %s", d.t.String(), s, d.expect)
 		}
 	}
 }
