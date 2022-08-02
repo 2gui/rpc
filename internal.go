@@ -311,7 +311,7 @@ func (c *ErrorCmd)WriteTo(w io.Writer)(n int64, err error){
 	if err != nil {
 		return
 	}
-	n0, err = encoding.WriteUint16(w, c.Errid)
+	n0, err = encoding.WriteUint64(w, c.Errid)
 	n += n0
 	if err != nil {
 		return
@@ -342,7 +342,7 @@ func (c *ErrorCmd)ReadFrom(r io.Reader, p *Point)(n int64, err error){
 	delete(p.sessions, c.Session)
 	p.lock.Unlock()
 
-	c.Errid, n0, err = encoding.ReadUint16(r)
+	c.Errid, n0, err = encoding.ReadUint64(r)
 	if err != nil {
 		return
 	}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"reflect"
 	"sync"
 
@@ -32,17 +33,17 @@ type Point struct{
 	defs map[string]uint32
 
 	lock sync.Mutex
-	sesinc uint32
+	sesinc uint16
 	sessions map[uint32]*sessionT
 
 	pingch chan struct{}
 }
 
-func NewPoint(w io.Writer, r io.ReadCloser)(p *Point){
-	return NewPointWithCtx(w, r, context.Background())
+func NewPoint(r io.ReadCloser, w io.Writer)(p *Point){
+	return NewPointWithCtx(r, w, context.Background())
 }
 
-func NewPointWithCtx(w io.Writer, r io.ReadCloser, ctx context.Context)(p *Point){
+func NewPointWithCtx(r io.ReadCloser, w io.Writer, ctx context.Context)(p *Point){
 	ctx0, cancel := context.WithCancel(ctx)
 	p = &Point{
 		flag: false,
@@ -74,8 +75,12 @@ func (p *Point)Ping()(err error){
 	if err != nil {
 		return
 	}
-	<-p.pingch
-	return
+	select {
+	case <-p.pingch:
+		return nil
+	case <-p.ctx.Done():
+		return p.ctx.Err()
+	}
 }
 
 func (p *Point)DefineCmd(id Cmd, newer CommandNewer){
@@ -102,6 +107,11 @@ func (p *Point)Register(name string, fuc any)(err error){
 }
 
 func (p *Point)Call(name string, args ...any)(res any, err error){
+	return p.CallAt(0, name, args...)
+}
+
+func (p *Point)CallAt(tid uint32, name string, args ...any)(res any, err error){
+	debugPrintf("calling: %d %s", tid, name)
 	vals := make([]reflect.Value, len(args))
 	for i, v := range args {
 		vals[i] = reflect.ValueOf(v)
@@ -115,14 +125,15 @@ func (p *Point)Call(name string, args ...any)(res any, err error){
 		ptrs: filterPtrs(vals),
 		ret: ret,
 	}
+	tid &= SesThread
 	p.lock.Lock()
 	p.sesinc++
-	sesid := p.sesinc
+	sesid := tid | (uint32)(p.sesinc)
 	for {
 		if _, ok := p.sessions[sesid]; !ok {
 			break
 		}
-		sesid++
+		sesid = tid | (SesCall & (sesid + 1))
 	}
 	p.sessions[sesid] = ses
 	p.lock.Unlock()
@@ -146,11 +157,7 @@ func (p *Point)Call(name string, args ...any)(res any, err error){
 }
 
 func (p *Point)SendCommand(id Cmd, cmd Command)(err error){
-	buf := bytes.NewBuffer(nil)
-	_, err = buf.Write([]byte{id})
-	if err != nil {
-		return
-	}
+	buf := bytes.NewBuffer([]byte{id})
 	_, err = cmd.WriteTo(buf)
 	if err != nil {
 		return
@@ -185,7 +192,17 @@ func (p *Point)ListenAndWait()(err error){
 	return p.Wait()
 }
 
+func (p *Point)IsClose()(bool){
+	select{
+	case <-p.ctx.Done():
+		return true
+	default:
+		return false
+	}
+}
+
 func (p *Point)Close()(err error){
+	p.cancel()
 	err = p.r.Close()
 	if wc, ok := p.w.(io.Closer); ok {
 		wc.Close()
@@ -200,7 +217,7 @@ func (p *Point)listener(){
 		buf []byte = make([]byte, 32767)
 		buf0 []byte = nil
 	)
-	defer p.cancel()
+	defer p.Close()
 	for {
 		buf0 = nil
 		l, _, err = encoding.ReadUint32(p.r)
@@ -232,4 +249,12 @@ func (p *Point)listener(){
 		}
 	}
 	p.err = err
+}
+
+
+func debugPrintf(format string, args ...any){
+	if false {
+		fmt.Fprintf(os.Stderr, format, args...)
+		fmt.Fprintln(os.Stderr)
+	}
 }
